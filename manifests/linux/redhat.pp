@@ -37,7 +37,7 @@ class firewall::linux::redhat (
   if $package_name {
     package { $package_name:
       ensure => $package_ensure,
-      before => Service[$service_name],
+      before => Service[$service_name, $service_name_v6],
     }
   }
 
@@ -62,7 +62,38 @@ class firewall::linux::redhat (
     ensure    => $ensure,
     enable    => $enable,
     hasstatus => true,
-    require   => File["/etc/sysconfig/${service_name_v6}"],
+  }
+
+  # Redhat 7 selinux user context for /etc/sysconfig/iptables is set to unconfined_u
+  # Redhat 7 selinux type context for /etc/sysconfig/iptables is set to etc_t
+  case $::selinux {
+    #lint:ignore:quoted_booleans
+    'true',true: {
+      case $::operatingsystemrelease {
+        /^7\..*/: {
+          case $::operatingsystem {
+            'CentOS': {
+              $seluser = 'unconfined_u'
+              $seltype = 'system_conf_t'
+            }
+            default : {
+              $seluser = 'unconfined_u'
+              $seltype = 'etc_t'
+            }
+          }
+        }
+        /^6\..*/:     {
+          $seluser = 'unconfined_u'
+          $seltype = 'system_conf_t'
+        }
+        default:      {
+          $seluser = 'system_u'
+          $seltype = 'system_conf_t'
+        }
+      }
+    }
+    default:     {}
+    #lint:endignore
   }
 
   file { "/etc/sysconfig/${service_name}":
@@ -70,6 +101,8 @@ class firewall::linux::redhat (
     owner  => 'root',
     group  => 'root',
     mode   => '0600',
+    seluser=> $seluser,
+    seltype=> $seltype
   }
 
   file { "/etc/sysconfig/${service_name_v6}":
@@ -77,43 +110,14 @@ class firewall::linux::redhat (
     owner  => 'root',
     group  => 'root',
     mode   => '0600',
+    seluser=> $seluser,
+    seltype=> $seltype
   }
 
   # Before puppet 4, the autobefore on the firewall type does not work - therefore
   # we need to keep this workaround here
   if versioncmp($::puppetversion, '4.0') <= 0 {
     File["/etc/sysconfig/${service_name}"] -> Service[$service_name]
-
-    # Redhat 7 selinux user context for /etc/sysconfig/iptables is set to unconfined_u
-    # Redhat 7 selinux type context for /etc/sysconfig/iptables is set to etc_t
-    case $::selinux {
-      #lint:ignore:quoted_booleans
-      'true',true: {
-        case $::operatingsystemrelease {
-          /^7\..*/: {
-            case $::operatingsystem {
-              'CentOS': {
-                File["/etc/sysconfig/${service_name}"] { seluser => 'unconfined_u', seltype => 'system_conf_t' }
-                File["/etc/sysconfig/${service_name_v6}"] { seluser => 'unconfined_u', seltype => 'system_conf_t' }
-              }
-              default : {
-                File["/etc/sysconfig/${service_name}"] { seluser => 'unconfined_u', seltype => 'etc_t' }
-                File["/etc/sysconfig/${service_name_v6}"] { seluser => 'unconfined_u', seltype => 'etc_t' }
-              }
-            }
-          }
-          /^6\..*/:     {
-            File["/etc/sysconfig/${service_name}"] { seluser => 'unconfined_u', seltype => 'system_conf_t' }
-            File["/etc/sysconfig/${service_name_v6}"] { seluser => 'unconfined_u', seltype => 'system_conf_t' }
-          }
-          default:      {
-            File["/etc/sysconfig/${service_name}"] { seluser => 'system_u', seltype => 'system_conf_t' }
-            File["/etc/sysconfig/${service_name_v6}"] { seluser => 'unconfined_u', seltype => 'system_conf_t' }
-          }
-        }
-      }
-      default:     {}
-      #lint:endignore
-    }
+    File["/etc/sysconfig/${service_name_v6}"] -> Service[$service_name_v6]
   }
 }
